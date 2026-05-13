@@ -20,6 +20,8 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment
 from openpyxl.utils import get_column_letter
 import streamlit as st
+from auth import login_required
+login_required()
 
 
 # ══════════════════════════════════════════════════════════════
