@@ -1,0 +1,8 @@
+*.xlsx
+*.xls
+*.zip
+__pycache__/
+.streamlit/
+_tmp_tpl/
+*.pyc
+.DS_Store
