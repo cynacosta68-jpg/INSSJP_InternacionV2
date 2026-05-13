@@ -471,7 +471,7 @@ for key, default in [
 st.markdown("""
 <div class="hdr">
     <h1>🏥 Procesador PAMI — Internación</h1>
-    <p>Procesamiento, valorización y generación de templates para importación INSSJP</p>
+    <p>Procesamiento, valorización y generación de templates para importación factura INSSJP</p>
 </div>
 """, unsafe_allow_html=True)
 
@@ -479,11 +479,11 @@ with st.sidebar:
     st.markdown("### 📁 Archivos de entrada")
     f_pami = st.file_uploader(
         "Archivo crudo PAMI", type=["xlsx", "xls"],
-        help="Factura ARCA de internación",
+        help="Archivos extraidos desde la pagina del organismo para de internación. Es uno por cada facturacion efectuada",
     )
     f_base = st.file_uploader(
         "Base de Datos", type=["xlsx", "xls"],
-        help="Parámetros con solapas DIRECTA, NORMAL y VALORES",
+        help="Parámetros de atribucion con solapas DIRECTA, NORMAL y VALORES",
     )
     st.markdown("---")
     st.markdown("### 🔗 Acceso rápido")
