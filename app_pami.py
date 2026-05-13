@@ -576,24 +576,61 @@ if f_pami and f_base:
 
     # Completar MONTO = 0 desde VALORES
     if filas_cero > 0 and df_val_sheet is not None:
-        completados = 0
-        for idx in df_pami[df_pami["MONTO"] == 0].index:
-            c_prac = df_pami.loc[idx, "C_PRACTICA"]
-            match = df_val_sheet[df_val_sheet["C_PRACTICA"] == c_prac]
-            if len(match) > 0:
-                df_pami.loc[idx, "MONTO"] = match.iloc[0]["VALOR RESULTANTE"]
-                completados += 1
-        if completados:
-            st.markdown(
-                f'<div class="ok-box">✅ Se completaron <b>{completados}</b> montos '
-                f"desde la solapa VALORES.</div>",
-                unsafe_allow_html=True,
+        # Detectar columnas dinámicamente (tolerante a variaciones)
+        col_cprac_val = None
+        col_valor_val = None
+        for c in df_val_sheet.columns:
+            cn = c.strip().upper().replace(" ", "_")
+            if cn in ("C_PRACTICA", "CPRACTICA", "COD_PRACTICA", "CODIGO_PRACTICA"):
+                col_cprac_val = c
+            if "VALOR" in cn and "RESULT" in cn:
+                col_valor_val = c
+        # Fallback: buscar por contenido parcial
+        if col_cprac_val is None:
+            for c in df_val_sheet.columns:
+                if "PRACT" in c.upper():
+                    col_cprac_val = c
+                    break
+        if col_valor_val is None:
+            for c in df_val_sheet.columns:
+                if "VALOR" in c.upper():
+                    col_valor_val = c
+                    break
+
+        if col_cprac_val and col_valor_val:
+            # Convertir a numérico para comparación segura
+            df_val_sheet[col_cprac_val] = pd.to_numeric(
+                df_val_sheet[col_cprac_val], errors="coerce"
             )
-        restantes = int((df_pami["MONTO"] == 0).sum())
-        if restantes:
+            completados = 0
+            for idx in df_pami[df_pami["MONTO"] == 0].index:
+                try:
+                    c_prac = int(df_pami.loc[idx, "C_PRACTICA"])
+                except (ValueError, TypeError):
+                    continue
+                match = df_val_sheet[df_val_sheet[col_cprac_val] == c_prac]
+                if len(match) > 0:
+                    val = match.iloc[0][col_valor_val]
+                    if pd.notna(val) and float(val) > 0:
+                        df_pami.loc[idx, "MONTO"] = float(val)
+                        completados += 1
+            if completados:
+                st.markdown(
+                    f'<div class="ok-box">✅ Se completaron <b>{completados}</b> montos '
+                    f"desde la solapa VALORES.</div>",
+                    unsafe_allow_html=True,
+                )
+            restantes = int((df_pami["MONTO"] == 0).sum())
+            if restantes:
+                st.markdown(
+                    f'<div class="warn-box">⚠️ Quedan <b>{restantes}</b> filas con '
+                    f"MONTO = 0 sin valor en VALORES.</div>",
+                    unsafe_allow_html=True,
+                )
+        else:
             st.markdown(
-                f'<div class="warn-box">⚠️ Quedan <b>{restantes}</b> filas con '
-                f"MONTO = 0 sin valor en VALORES.</div>",
+                '<div class="warn-box">⚠️ No se encontraron las columnas esperadas '
+                'en la solapa VALORES (C_PRACTICA / VALOR RESULTANTE).</div>',
                 unsafe_allow_html=True,
             )
     elif filas_cero > 0:
