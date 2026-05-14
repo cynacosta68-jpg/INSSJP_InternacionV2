@@ -301,7 +301,7 @@ MAPEO_TPL = {
     "afiliado_denominacion": ["apellido y nombre", "afiliado_denominacion", "nom.beneficiario"],
     "fecha_prestacion":      ["F. DE PRACTICA", "fecha_transaccion", "fecha prestacion", "fecha"],
     "cod_practica":          ["C_PRACTICA", "cod_practica", "prestacion", "codigo"],
-    "cantidad":              ["CANTIDAD VALIDADA", "cantidad", "cant"],
+    "cantidad":              ["CANTIDAD INFORMADAS", "cantidad", "cant"],
     "honorario":             ["MONTO", "total", "honorario", "importe_total"],
     "iva":                   ["iva"],
     "numaut":                ["N. DE OP", "transaccion_item", "numaut", "NRO. ORDEN"],
