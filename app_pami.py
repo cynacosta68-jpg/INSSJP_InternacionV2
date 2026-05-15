@@ -301,7 +301,7 @@ MAPEO_TPL = {
     "afiliado_denominacion": ["apellido y nombre", "afiliado_denominacion", "nom.beneficiario"],
     "fecha_prestacion":      ["F. DE PRACTICA", "fecha_transaccion", "fecha prestacion", "fecha"],
     "cod_practica":          ["C_PRACTICA", "cod_practica", "prestacion", "codigo"],
-    "cantidad":              ["CANTIDAD INFORMADAS", "cantidad", "cant"],
+    "cantidad":              ["CANTIDAD INFORMADAS", "CANTIDAD VALIDADA", "cantidad", "cant"],
     "honorario":             ["MONTO", "total", "honorario", "importe_total"],
     "iva":                   ["iva"],
     "numaut":                ["N. DE OP", "transaccion_item", "numaut", "NRO. ORDEN"],
@@ -462,9 +462,51 @@ for key, default in [
     ("df_dir", None),
     ("df_nor", None),
     ("df_valores", None),
+    ("df_master", None),          # ← fuente de verdad para ediciones
+    ("_editor_version", 0),       # ← versión del editor para forzar re-render
+    ("_prev_filtros", None),      # ← filtros anteriores para detectar cambios
+    ("_vista_indices", None),     # ← índices visibles en la vista actual
+    ("valores_aplicados", False), # ← flag para no reprocesar VALORES
 ]:
     if key not in st.session_state:
         st.session_state[key] = default
+
+
+def _guardar_ediciones_pendientes():
+    """Aplica ediciones pendientes del data_editor al df_master."""
+    # Buscar cualquier editor_p1_vN key activo
+    editor_key = None
+    for k in st.session_state:
+        if isinstance(k, str) and k.startswith("editor_p1_v"):
+            editor_key = k
+            break
+
+    if editor_key is None or editor_key not in st.session_state:
+        return
+    edit_state = st.session_state[editor_key]
+    if not edit_state or "edited_rows" not in edit_state:
+        return
+    edited = edit_state["edited_rows"]
+    if not edited or st.session_state.df_master is None:
+        return
+
+    # Recuperar los índices originales que estaban visibles
+    if "_vista_indices" not in st.session_state or st.session_state._vista_indices is None:
+        return
+
+    indices_vista = st.session_state._vista_indices
+    df = st.session_state.df_master
+    cols_editables = ["Ayudante", "Cuenta_ayudante", "Anatomia", "MATRICULA"]
+
+    for row_pos_str, cambios in edited.items():
+        row_pos = int(row_pos_str)
+        if row_pos < len(indices_vista):
+            idx_real = indices_vista[row_pos]
+            for col, val in cambios.items():
+                if col in cols_editables and col in df.columns:
+                    df.at[idx_real, col] = val
+
+    st.session_state.df_master = df
 
 
 # ══════════════════════════════════════════════════════════════
@@ -524,36 +566,45 @@ render_steps(st.session_state.paso)
 # ══════════════════════════════════════════════════════════════
 if f_pami and f_base:
 
-    # ── Lectura de archivos ──────────────────────────────────
-    try:
-        xls_p = pd.ExcelFile(f_pami)
-        hoja = None
-        for s in xls_p.sheet_names:
-            tmp = pd.read_excel(xls_p, sheet_name=s, nrows=2)
-            if "MONTO" in tmp.columns and "C_PRACTICA" in tmp.columns:
-                hoja = s
-                break
-        if not hoja:
-            st.error("No se encontró hoja con columnas MONTO y C_PRACTICA en el archivo PAMI.")
-            st.stop()
-        df_pami = pd.read_excel(xls_p, sheet_name=hoja)
-        df_pami["MONTO"] = pd.to_numeric(df_pami["MONTO"], errors="coerce").fillna(0)
+    # ── Auto-guardar ediciones pendientes ANTES de todo ──────
+    _guardar_ediciones_pendientes()
 
+    # ── Lectura de archivos (solo la primera vez) ────────────
+    try:
         xls_b = pd.ExcelFile(f_base)
         if "DIRECTA" not in xls_b.sheet_names or "NORMAL" not in xls_b.sheet_names:
             st.error("La Base de Datos debe tener solapas DIRECTA y NORMAL.")
             st.stop()
-        df_dir = pd.read_excel(xls_b, sheet_name="DIRECTA")
-        df_nor = pd.read_excel(xls_b, sheet_name="NORMAL")
-        df_val_sheet = (
-            pd.read_excel(xls_b, sheet_name="VALORES")
-            if "VALORES" in xls_b.sheet_names
-            else None
-        )
 
-        st.session_state.df_dir = df_dir
-        st.session_state.df_nor = df_nor
-        st.session_state.df_valores = df_val_sheet
+        if st.session_state.df_dir is None:
+            st.session_state.df_dir = pd.read_excel(xls_b, sheet_name="DIRECTA")
+        if st.session_state.df_nor is None:
+            st.session_state.df_nor = pd.read_excel(xls_b, sheet_name="NORMAL")
+        if st.session_state.df_valores is None and "VALORES" in xls_b.sheet_names:
+            st.session_state.df_valores = pd.read_excel(xls_b, sheet_name="VALORES")
+
+        df_dir = st.session_state.df_dir
+        df_nor = st.session_state.df_nor
+        df_val_sheet = st.session_state.df_valores
+
+        # Leer archivo PAMI solo si no hay df_master aún
+        if st.session_state.df_master is None:
+            xls_p = pd.ExcelFile(f_pami)
+            hoja = None
+            for s in xls_p.sheet_names:
+                tmp = pd.read_excel(xls_p, sheet_name=s, nrows=2)
+                if "MONTO" in tmp.columns and "C_PRACTICA" in tmp.columns:
+                    hoja = s
+                    break
+            if not hoja:
+                st.error("No se encontró hoja con columnas MONTO y C_PRACTICA en el archivo PAMI.")
+                st.stop()
+            df_pami = pd.read_excel(xls_p, sheet_name=hoja)
+            df_pami["MONTO"] = pd.to_numeric(df_pami["MONTO"], errors="coerce").fillna(0)
+            st.session_state.df_master = df_pami.copy()
+
+        # Trabajar siempre con df_master
+        df_pami = st.session_state.df_master
         st.session_state.paso = max(st.session_state.paso, 1)
 
     except Exception as e:
@@ -576,8 +627,8 @@ if f_pami and f_base:
     # ═════════════════════════════════════════════════════════
     st.markdown("### 🔧 Paso 1 — Procesar prácticas")
 
-    # Completar MONTO = 0 desde VALORES
-    if filas_cero > 0 and df_val_sheet is not None:
+    # Completar MONTO = 0 desde VALORES (solo la primera vez)
+    if filas_cero > 0 and df_val_sheet is not None and not st.session_state.valores_aplicados:
         # Detectar columnas dinámicamente (tolerante a variaciones)
         col_cprac_val = None
         col_valor_val = None
@@ -635,6 +686,8 @@ if f_pami and f_base:
                 'en la solapa VALORES (C_PRACTICA / VALOR RESULTANTE).</div>',
                 unsafe_allow_html=True,
             )
+        st.session_state.valores_aplicados = True
+        st.session_state.df_master = df_pami  # Persistir cambios
     elif filas_cero > 0:
         st.markdown(
             f'<div class="warn-box">⚠️ {filas_cero} filas con MONTO = 0. '
@@ -659,22 +712,62 @@ if f_pami and f_base:
     fc1, fc2, fc3 = st.columns(3)
     with fc1:
         filtro_bate = st.selectbox(
-            "BATE", ["Todos"] + sorted(df_pami["BATE"].unique().tolist())
+            "BATE", ["Todos"] + sorted(df_pami["BATE"].unique().tolist()),
+            key="filtro_bate",
         )
     with fc2:
-        filtro_modal = st.selectbox("Modalidad", ["Todas", "DIRECTA", "NORMAL"])
+        # Opciones dinámicas de pacientes según BATE seleccionado
+        if filtro_bate != "Todos" and "APELLIDO Y NOMBRE" in df_pami.columns:
+            pacientes_disp = sorted(
+                df_pami[df_pami["BATE"] == filtro_bate]["APELLIDO Y NOMBRE"]
+                .dropna().unique().tolist()
+            )
+        elif "APELLIDO Y NOMBRE" in df_pami.columns:
+            pacientes_disp = sorted(df_pami["APELLIDO Y NOMBRE"].dropna().unique().tolist())
+        else:
+            pacientes_disp = []
+        filtro_paciente = st.selectbox(
+            "Paciente", ["Todos"] + pacientes_disp,
+            key="filtro_paciente",
+        )
     with fc3:
-        filtro_monto = st.selectbox("Monto", ["Todos", "Solo $0", "Solo > $0"])
+        # Opciones dinámicas de C_PRACTICA según filtros anteriores
+        df_temp = df_pami.copy()
+        if filtro_bate != "Todos":
+            df_temp = df_temp[df_temp["BATE"] == filtro_bate]
+        if filtro_paciente != "Todos" and "APELLIDO Y NOMBRE" in df_temp.columns:
+            df_temp = df_temp[df_temp["APELLIDO Y NOMBRE"] == filtro_paciente]
+        practicas_disp = sorted(df_temp["C_PRACTICA"].dropna().unique().tolist())
+        practicas_str = [str(int(p)) if isinstance(p, (int, float)) else str(p) for p in practicas_disp]
+        filtro_practica = st.selectbox(
+            "C_PRACTICA", ["Todas"] + practicas_str,
+            key="filtro_practica",
+        )
 
+    # Detectar cambio de filtro → auto-guardar ediciones pendientes
+    filtros_actuales = (filtro_bate, filtro_paciente, filtro_practica)
+    if st.session_state._prev_filtros is not None and st.session_state._prev_filtros != filtros_actuales:
+        _guardar_ediciones_pendientes()
+        st.session_state._editor_version += 1
+    st.session_state._prev_filtros = filtros_actuales
+
+    # Aplicar filtros
     df_vista = df_pami.copy()
     if filtro_bate != "Todos":
         df_vista = df_vista[df_vista["BATE"] == filtro_bate]
-    if filtro_modal != "Todas":
-        df_vista = df_vista[df_vista["_modalidad"] == filtro_modal]
-    if filtro_monto == "Solo $0":
-        df_vista = df_vista[df_vista["MONTO"] == 0]
-    elif filtro_monto == "Solo > $0":
-        df_vista = df_vista[df_vista["MONTO"] > 0]
+    if filtro_paciente != "Todos" and "APELLIDO Y NOMBRE" in df_vista.columns:
+        df_vista = df_vista[df_vista["APELLIDO Y NOMBRE"] == filtro_paciente]
+    if filtro_practica != "Todas":
+        try:
+            cod = int(filtro_practica)
+            df_vista = df_vista[df_vista["C_PRACTICA"] == cod]
+        except (ValueError, TypeError):
+            df_vista = df_vista[df_vista["C_PRACTICA"].astype(str) == filtro_practica]
+
+    # Guardar los índices reales visibles para poder mapear ediciones
+    st.session_state._vista_indices = df_vista.index.tolist()
+
+    st.caption(f"Mostrando **{len(df_vista)}** de {len(df_pami)} filas")
 
     # ── Editor de datos ──────────────────────────────────────
     st.markdown("#### ✏️ Edición de prácticas")
@@ -695,7 +788,7 @@ if f_pami and f_base:
         "Anatomia": st.column_config.CheckboxColumn("Anatomía", default=False),
         "Cuenta_ayudante": st.column_config.TextColumn("Cuenta Ayudante"),
         "MATRICULA": st.column_config.TextColumn("Matrícula"),
-        "MONTO": st.column_config.NumberColumn("Monto", format="$%.2f"),
+        "MONTO": st.column_config.NumberColumn("Monto", format="$%.2f", disabled=True),
         "_modalidad": st.column_config.TextColumn("Modalidad", disabled=True),
         "BATE": st.column_config.TextColumn("BATE", disabled=True),
         "PROFESIONAL ACTUANTE": st.column_config.TextColumn("Prof. Actuante", disabled=True),
@@ -704,14 +797,30 @@ if f_pami and f_base:
         "APELLIDO Y NOMBRE": st.column_config.TextColumn("Paciente", disabled=True),
     }
 
+    editor_key = f"editor_p1_v{st.session_state._editor_version}"
+
     df_edit = st.data_editor(
         df_vista[cols_show],
         column_config=col_cfg,
         use_container_width=True,
         num_rows="fixed",
-        key="editor_p1",
+        key=editor_key,
         height=420,
     )
+
+    # Auto-aplicar ediciones inmediatas al df_master
+    if df_edit is not None and editor_key in st.session_state:
+        edit_state = st.session_state[editor_key]
+        if edit_state and "edited_rows" in edit_state and edit_state["edited_rows"]:
+            indices_vista = st.session_state.get("_vista_indices", [])
+            cols_editables = ["Ayudante", "Cuenta_ayudante", "Anatomia", "MATRICULA"]
+            for row_pos_str, cambios in edit_state["edited_rows"].items():
+                row_pos = int(row_pos_str)
+                if row_pos < len(indices_vista):
+                    idx_real = indices_vista[row_pos]
+                    for col, val in cambios.items():
+                        if col in cols_editables:
+                            st.session_state.df_master.at[idx_real, col] = val
 
     # Alerta de ayudante sin cuenta
     if df_edit is not None:
@@ -753,11 +862,13 @@ if f_pami and f_base:
     # ── Guardar cambios ──────────────────────────────────────
     st.markdown("---")
     if st.button("💾 Guardar cambios y continuar", type="primary", use_container_width=True):
-        for col in ["Ayudante", "Cuenta_ayudante", "Anatomia", "MATRICULA", "MONTO"]:
-            if col in df_edit.columns:
-                df_pami.loc[df_vista.index, col] = df_edit[col].values
-        df_pami["_modalidad"] = df_pami.apply(determinar_modalidad, axis=1)
-        st.session_state.df_proc = df_pami.copy()
+        # Aplicar ediciones pendientes
+        _guardar_ediciones_pendientes()
+
+        df_master = st.session_state.df_master
+        df_master["_modalidad"] = df_master.apply(determinar_modalidad, axis=1)
+        st.session_state.df_master = df_master
+        st.session_state.df_proc = df_master.copy()
         st.session_state.guardado = True
         st.session_state.paso = max(st.session_state.paso, 2)
         st.rerun()
